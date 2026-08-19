@@ -1,5 +1,4 @@
 import QtQuick
-import QtQuick.Shapes
 import qs.Commons
 
 Item {
@@ -8,89 +7,51 @@ Item {
   property real iconSize: Style.font.icon
   property color color: Color.foreground
 
-  width: iconSize
+  width: iconSize * 1.6
   height: iconSize
-  implicitWidth: iconSize
+  implicitWidth: iconSize * 1.6
   implicitHeight: iconSize
 
-  Shape {
-    anchors.fill: parent
-    antialiasing: true
-    layer.enabled: true
-    layer.samples: 4
+  // Nextcloud logo: three ring circles side by side.
+  // Centre is largest, left and right are smaller.
+  // Rings just touch each other symmetrically.
 
-    ShapePath {
-      fillColor: root.color
-      strokeWidth: 0
+  readonly property real strokeWidth: Math.max(1.5, iconSize * 0.14)
+  readonly property real centreRadius: iconSize * 0.40
+  readonly property real sideRadius: iconSize * 0.22
 
-      // Nextcloud mark silhouette
-      //
-      // The shape is constructed as one continuous path:
-      //   - left rounded lobe
-      //   - tall central arch
-      //   - right rounded lobe
-      //   - flat lower edge
+  // Centre ring (largest)
+  Rectangle {
+    anchors.centerIn: parent
+    width: root.centreRadius * 2
+    height: root.centreRadius * 2
+    radius: root.centreRadius
+    color: "transparent"
+    border.color: root.color
+    border.width: root.strokeWidth
+  }
 
-      startX: root.width * 0.08
-      startY: root.height * 0.72
+  // Left ring — right edge just touches centre ring left edge
+  Rectangle {
+    anchors.verticalCenter: parent.verticalCenter
+    x: parent.width / 2 - root.centreRadius - root.sideRadius * 2 + root.strokeWidth
+    width: root.sideRadius * 2
+    height: root.sideRadius * 2
+    radius: root.sideRadius
+    color: "transparent"
+    border.color: root.color
+    border.width: root.strokeWidth
+  }
 
-      // Left lobe
-      PathCubic {
-        control1X: root.width * 0.08
-        control1Y: root.height * 0.55
-        control2X: root.width * 0.20
-        control2Y: root.height * 0.43
-        x: root.width * 0.34
-        y: root.height * 0.48
-      }
-
-      // Transition into central arch
-      PathCubic {
-        control1X: root.width * 0.34
-        control1Y: root.height * 0.28
-        control2X: root.width * 0.42
-        control2Y: root.height * 0.12
-        x: root.width * 0.50
-        y: root.height * 0.12
-      }
-
-      // Top of central arch
-      PathCubic {
-        control1X: root.width * 0.64
-        control1Y: root.height * 0.12
-        control2X: root.width * 0.72
-        control2Y: root.height * 0.28
-        x: root.width * 0.72
-        y: root.height * 0.48
-      }
-
-      // Right lobe
-      PathCubic {
-        control1X: root.width * 0.86
-        control1Y: root.height * 0.43
-        control2X: root.width * 0.92
-        control2Y: root.height * 0.56
-        x: root.width * 0.92
-        y: root.height * 0.72
-      }
-
-      // Right bottom
-      PathLine {
-        x: root.width * 0.92
-        y: root.height * 0.82
-      }
-
-      // Flat bottom
-      PathLine {
-        x: root.width * 0.08
-        y: root.height * 0.82
-      }
-
-      // Close
-      PathLine {
-        x: root.width * 0.08
-        y: root.height * 0.72
-      }
-    }
+  // Right ring — left edge just touches centre ring right edge
+  Rectangle {
+    anchors.verticalCenter: parent.verticalCenter
+    x: parent.width / 2 + root.centreRadius - root.strokeWidth
+    width: root.sideRadius * 2
+    height: root.sideRadius * 2
+    radius: root.sideRadius
+    color: "transparent"
+    border.color: root.color
+    border.width: root.strokeWidth
   }
 }
