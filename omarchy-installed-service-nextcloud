@@ -1,0 +1,12 @@
+#!/bin/bash
+
+# omarchy:summary=Check whether Nextcloud is installed and running
+# omarchy:hidden=true
+
+set -euo pipefail
+
+if omarchy-cmd-present nextcloud && pgrep -x nextcloud >/dev/null 2>&1; then
+  exit 0
+fi
+
+pgrep -x nextcloud >/dev/null 2>&1

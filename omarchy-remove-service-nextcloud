@@ -1,0 +1,12 @@
+#!/bin/bash
+
+# omarchy:summary=Remove the Nextcloud service.
+
+echo "Stopping Nextcloud..."
+nextcloud --quit &>/dev/null || true
+
+echo "Removing Nextcloud from the bar..."
+omarchy-plugin-disable aerorohit.nextcloud
+
+echo "Removing packages..."
+omarchy-pkg-remove nextcloud-client nextcloud-client-cli

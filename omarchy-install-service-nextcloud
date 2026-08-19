@@ -1,0 +1,13 @@
+#!/bin/bash
+
+# omarchy:summary=Install and start the Nextcloud service.
+
+echo "Installing all dependencies..."
+omarchy-pkg-add nextcloud-client nextcloud-client-cli
+
+echo "Adding Nextcloud to the bar..."
+omarchy-plugin-enable aerorohit.nextcloud
+
+echo "Starting Nextcloud..."
+uwsm-app -- nextcloud --background &>/dev/null &
+echo "See Nextcloud icon behind ☁ hover tray in top right and right-click for setup."
