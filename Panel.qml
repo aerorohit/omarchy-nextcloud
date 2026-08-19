@@ -274,6 +274,7 @@ Panel {
             visible: nextcloud.actionStatus !== "" || nextcloud.lastError !== ""
             width: parent.width
             text: nextcloud.actionStatus !== "" ? nextcloud.actionStatus : nextcloud.lastError
+            textFormat: Text.PlainText
             color: nextcloud.lastError !== "" && nextcloud.actionStatus === "" ? root.urgent : root.dim
             font.family: root.fontFamily
             font.pixelSize: Style.font.bodySmall
@@ -408,6 +409,7 @@ Panel {
         Text {
           Layout.fillWidth: true
           text: fileRow.fileName
+          textFormat: Text.PlainText
           color: root.foreground
           font.family: root.fontFamily
           font.pixelSize: Style.font.body
@@ -417,6 +419,7 @@ Panel {
         Text {
           Layout.fillWidth: true
           text: Model.fileMeta(fileRow.file)
+          textFormat: Text.PlainText
           color: root.dim
           font.family: root.fontFamily
           font.pixelSize: Style.font.caption
@@ -450,5 +453,8 @@ Panel {
     font.family: root.fontFamily
     font.pixelSize: Style.font.bodySmall
     elide: Text.ElideRight
+    // Synced data (server URL, folder names) is untrusted: never let AutoText
+    // interpret it as markup, which could load remote images when shown.
+    textFormat: Text.PlainText
   }
 }
