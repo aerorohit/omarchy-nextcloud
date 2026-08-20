@@ -22,13 +22,23 @@ Click the widget to open the panel. The toggle switch **pauses/resumes** Nextclo
 - **Right-click** — refresh status
 - **Middle-click** — open Nextcloud desktop client
 
-Keyboard: `j`/`k` move the cursor, `Enter` activates, `Escape` closes, `r` refreshes, `o` opens Nextcloud settings.
+Keyboard: `j`/`k` move the cursor, `Enter` activates, `Escape` closes, `r` refreshes, `o` opens the Nextcloud desktop app, `i` installs it when missing.
 
 The panel shows:
 
 - **Stored** — total size of local sync folder
 - **Server** — configured Nextcloud server URL
 - **Recent files** — most recently modified synced files (up to 25)
+- **Action row** — opens the Nextcloud desktop app; if the desktop client is
+  not installed, the row instead offers to install it (runs
+  `omarchy-pkg-add nextcloud-client` in a terminal)
+
+## Tray icon
+
+While the widget is on the bar, the desktop client's own tray icon is hidden
+(added to the `omarchy.tray` widget's `hidden` list in `shell.json`) so sync
+status lives in one place. Disabling or removing the plugin restores the
+client's tray icon automatically.
 
 ## Configure
 

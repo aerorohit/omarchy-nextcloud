@@ -6,6 +6,7 @@ import Quickshell.Io
 import qs.Commons
 import qs.Ui
 import "Model.js" as Model
+import "TrayState.js" as TrayState
 
 Panel {
   id: root
@@ -14,7 +15,7 @@ Panel {
   manageIpc: false
 
   property string userConfigPath: Quickshell.env("HOME") + "/.config/omarchy"
-  property string focusSection: "header"
+  property string focusSection: "app"
   property int fileIndex: 0
   property bool cursorActive: false
   property int phraseIndex: 0
@@ -42,12 +43,18 @@ Panel {
 
   readonly property bool headerHasCursor: cursorActive && focusSection === "header" && nextcloud.installed
 
+  readonly property string appRowTitle: !nextcloud.installed ? "Nextcloud desktop is not installed"
+    : (nextcloud.authenticated ? "Open Nextcloud app" : "Open Nextcloud")
+  readonly property string appRowMeta: !nextcloud.installed ? "Install the desktop sync client"
+    : (nextcloud.authenticated ? "Settings, activity and folders" : "Sign in and choose what to sync")
+
   function ensureCursor() {
     if (!nextcloud.authenticated) {
-      focusSection = "header"
+      focusSection = "app"
       fileIndex = 0
       return
     }
+    if (focusSection === "app") return
     if (nextcloud.files.length === 0) {
       focusSection = "header"
       fileIndex = 0
@@ -62,10 +69,26 @@ Panel {
     cursorActive = true
     ensureCursor()
     if (dy === 0) return
+    if (focusSection === "app") {
+      if (dy < 0 && nextcloud.authenticated) {
+        if (nextcloud.files.length > 0) {
+          focusSection = "files"
+          fileIndex = nextcloud.files.length - 1
+        } else {
+          setHeaderCursor()
+        }
+        scrollCursorIntoView()
+      }
+      return
+    }
     if (focusSection === "header") {
-      if (dy > 0 && nextcloud.files.length > 0) {
-        focusSection = "files"
-        fileIndex = 0
+      if (dy > 0) {
+        if (nextcloud.files.length > 0) {
+          focusSection = "files"
+          fileIndex = 0
+        } else {
+          focusSection = "app"
+        }
         scrollCursorIntoView()
       }
       return
@@ -73,6 +96,11 @@ Panel {
     if (focusSection === "files") {
       if (dy < 0 && fileIndex === 0) {
         setHeaderCursor()
+        return
+      }
+      if (dy > 0 && fileIndex === nextcloud.files.length - 1) {
+        focusSection = "app"
+        scrollCursorIntoView()
         return
       }
       fileIndex = Math.max(0, Math.min(nextcloud.files.length - 1, fileIndex + dy))
@@ -92,8 +120,20 @@ Panel {
 
   function activateCursor() {
     ensureCursor()
-    if (focusSection === "header") toggleRunning()
+    if (focusSection === "app") activateAppRow()
+    else if (focusSection === "header") toggleRunning()
     else if (focusSection === "files") nextcloud.openFile(selectedFile())
+  }
+
+  function activateAppRow() {
+    if (!nextcloud.installed) nextcloud.installDesktop()
+    else nextcloud.openApp()
+  }
+
+  function setAppCursor() {
+    cursorActive = true
+    focusSection = "app"
+    scrollCursorIntoView()
   }
 
   function selectedFile() {
@@ -125,6 +165,10 @@ Panel {
   }
 
   function scrollCursorIntoView() {
+    if (focusSection === "app" && appRow) {
+      scrollItemIntoView(appRow)
+      return
+    }
     if (focusSection === "files" && fileColumn && fileIndex >= 0 && fileIndex < fileColumn.children.length) {
       scrollItemIntoView(fileColumn.children[fileIndex])
     }
@@ -140,6 +184,69 @@ Panel {
     Qt.callLater(function() { keyCatcher.forceActiveFocus() })
   }
   onFileIndexChanged: scrollCursorIntoView()
+
+  // While this widget sits on the bar, the desktop client's own tray icon is
+  // redundant — park it in the tray's hidden list. The icon is put back once
+  // the plugin leaves the bar (disable, remove, or bar switch).
+  readonly property string trayWidgetId: "omarchy.tray"
+  readonly property string trayItemId: "Nextcloud"
+
+  function findTrayEntry(cfg) {
+    if (!cfg || !cfg.bar || !cfg.bar.layout) return null
+    var sections = ["left", "center", "right"]
+    for (var s = 0; s < sections.length; s++) {
+      var entries = cfg.bar.layout[sections[s]]
+      if (!Array.isArray(entries)) continue
+      for (var i = 0; i < entries.length; i++) {
+        var entry = entries[i]
+        if (entry && String(entry.id || "") === trayWidgetId) return entry
+      }
+    }
+    return null
+  }
+
+  function hideTrayItem() {
+    if (!bar || !bar.shell || typeof bar.shell.mutateShellConfig !== "function") return
+    var itemId = trayItemId
+    try {
+      var entry = findTrayEntry(bar.shell.shellConfig)
+      var current = entry && Array.isArray(entry.hidden) ? entry.hidden : []
+      if (current.indexOf(itemId) !== -1) return
+      bar.shell.mutateShellConfig(function(cfg) {
+        var target = root.findTrayEntry(cfg)
+        if (!target) return
+        var list = Array.isArray(target.hidden) ? target.hidden.slice() : []
+        if (list.indexOf(itemId) === -1) list.push(itemId)
+        target.hidden = list
+      })
+    } catch (error) {
+      console.warn("nextcloud: could not hide tray icon:", error)
+    }
+  }
+
+  // Widget destruction also fires on shell restarts and bar layout rebuilds,
+  // where the plugin stays enabled and the icon should remain hidden — so the
+  // restore runs detached, after a grace period, and only when the plugin is
+  // genuinely gone from the bar. It edits shell.json directly (the qs IPC
+  // cannot pass arrays), which also covers the shell not running at all.
+  function scheduleTrayItemRestore() {
+    var check = "omarchy-shell shell listPlugins 2>/dev/null"
+      + " | jq -e '.[] | select(.id == \"aerorohit.nextcloud\" and .enabled == true)' >/dev/null 2>&1"
+    var unhide = "cfg=\"$HOME/.config/omarchy/shell.json\"; tmp=$(mktemp)"
+      + " && jq '.bar.layout |= with_entries(.value |= map("
+      + "if (type == \"object\" and .id == \"omarchy.tray\") "
+      + "then .hidden = [.hidden | if type == \"array\" then .[] else empty end | select(. != \"Nextcloud\")] "
+      + "else . end))' \"$cfg\" > \"$tmp\" && mv \"$tmp\" \"$cfg\""
+    Quickshell.execDetached(["bash", "-c",
+      "sleep 2; if " + check + "; then exit 0; fi; " + unhide])
+  }
+
+  Component.onCompleted: {
+    TrayState.acquire()
+    hideTrayItem()
+  }
+  Component.onDestruction: if (TrayState.release()) scheduleTrayItemRestore()
+  onBarChanged: if (bar) hideTrayItem()
 
   Service {
     id: nextcloud
@@ -161,6 +268,8 @@ Panel {
     function hide(): void { root.close() }
     function toggle(): void { root.toggle() }
     function refresh(): string { nextcloud.refresh(); return "ok" }
+    function install(): string { nextcloud.installDesktop(); return "ok" }
+    function openApp(): string { nextcloud.openApp(); return "ok" }
     function status(): string { return nextcloud.statusText }
   }
 
@@ -180,7 +289,7 @@ Panel {
     }
     onPressed: function(buttonCode) {
       if (buttonCode === Qt.RightButton) nextcloud.refresh()
-      else if (buttonCode === Qt.MiddleButton) nextcloud.openSettings()
+      else if (buttonCode === Qt.MiddleButton) nextcloud.openApp()
       else root.toggle()
     }
   }
@@ -207,7 +316,8 @@ Panel {
       onTabRequested: function(direction) { root.switchPanel(direction) }
       onTextKey: function(t) {
         if (t === "r" || t === "R") nextcloud.refresh()
-        else if (t === "o" || t === "O") nextcloud.openSettings()
+        else if ((t === "o" || t === "O") && nextcloud.installed) nextcloud.openApp()
+        else if ((t === "i" || t === "I") && !nextcloud.installed) nextcloud.installDesktop()
       }
 
       Flickable {
@@ -295,6 +405,17 @@ Panel {
           }
 
           PanelSeparator {
+            visible: appRow.visible
+            foreground: root.foreground
+          }
+
+          AppRow {
+            id: appRow
+            visible: nextcloud.probed
+            width: parent.width
+          }
+
+          PanelSeparator {
             visible: nextcloud.authenticated
             foreground: root.foreground
           }
@@ -363,6 +484,74 @@ Panel {
     PropertyAnimation {
       target: hero; property: "metaOpacity"
       to: 1.0; duration: 260; easing.type: Easing.InQuad
+    }
+  }
+
+  // Bottom action row: an install prompt while the desktop client is missing,
+  // and an "open the app" shortcut once it is installed.
+  component AppRow: CursorSurface {
+    id: appRowItem
+
+    hasCursor: root.cursorActive && root.focusSection === "app"
+    foreground: root.foreground
+
+    implicitHeight: appRowContent.implicitHeight + Style.spacing.rowPaddingX
+
+    MouseArea {
+      anchors.fill: parent
+      hoverEnabled: true
+      cursorShape: Qt.PointingHandCursor
+      onEntered: root.setAppCursor()
+      onClicked: root.activateAppRow()
+    }
+
+    RowLayout {
+      id: appRowContent
+      anchors.left: parent.left
+      anchors.right: parent.right
+      anchors.verticalCenter: parent.verticalCenter
+      anchors.leftMargin: Style.space(10)
+      anchors.rightMargin: Style.space(10)
+      spacing: Style.space(8)
+
+      Text {
+        text: nextcloud.installed ? "" : ""
+        color: root.foreground
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.heading
+        Layout.alignment: Qt.AlignVCenter
+      }
+
+      ColumnLayout {
+        Layout.fillWidth: true
+        spacing: Style.space(1)
+
+        Text {
+          Layout.fillWidth: true
+          text: root.appRowTitle
+          color: root.foreground
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.body
+          elide: Text.ElideRight
+        }
+
+        Text {
+          Layout.fillWidth: true
+          text: root.appRowMeta
+          color: root.dim
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.caption
+          elide: Text.ElideRight
+        }
+      }
+
+      PanelActionButton {
+        iconText: nextcloud.installed ? "󰌼" : "󰇚"
+        foreground: root.foreground
+        fontFamily: root.fontFamily
+        Layout.alignment: Qt.AlignVCenter
+        onClicked: root.activateAppRow()
+      }
     }
   }
 

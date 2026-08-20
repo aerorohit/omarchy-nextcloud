@@ -8,5 +8,17 @@ nextcloud --quit &>/dev/null || true
 echo "Removing Nextcloud from the bar..."
 omarchy-plugin-disable aerorohit.nextcloud
 
+# Put the client's tray icon back in case the widget had hidden it and the
+# shell could not restore it (e.g. removal while the shell was not running).
+shell_json="$HOME/.config/omarchy/shell.json"
+if [[ -f $shell_json ]]; then
+  tmp=$(mktemp)
+  jq '.bar.layout |= with_entries(.value |= map(
+    if (type == "object" and .id == "omarchy.tray")
+    then .hidden = [.hidden | if type == "array" then .[] else empty end | select(. != "Nextcloud")]
+    else . end
+  ))' "$shell_json" >"$tmp" && mv "$tmp" "$shell_json"
+fi
+
 echo "Removing packages..."
-omarchy-pkg-remove nextcloud-client nextcloud-client-cli
+omarchy-pkg-remove nextcloud-client

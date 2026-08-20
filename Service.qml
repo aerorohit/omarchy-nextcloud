@@ -13,6 +13,9 @@ Item {
   property bool installed: false
   property bool running: false
   property bool authenticated: false
+  // False until the first successful status probe, so the panel does not flash
+  // the install prompt while the initial check is still in flight.
+  property bool probed: false
 
   property bool refreshing: false
   property string statusText: "Checking…"
@@ -36,6 +39,7 @@ Item {
   readonly property int refreshIntervalSec: intSetting("refreshIntervalSec", 60, 10, 3600)
   readonly property bool busy: statusProcess.running
   readonly property string helperPath: (userConfigPath || "") + "/plugins/aerorohit.nextcloud/status.py"
+  readonly property string installScriptPath: (userConfigPath || "") + "/plugins/aerorohit.nextcloud/omarchy-install-service-nextcloud"
 
   property string _statusOutput: ""
   property string _statusError: ""
@@ -95,10 +99,22 @@ Item {
     Quickshell.execDetached(["xdg-open", file.path])
   }
 
-  function openSettings() {
+  function openApp() {
     if (installed) {
       Quickshell.execDetached(["nextcloud"])
     }
+  }
+
+  // pacman needs a tty for the sudo password, so the install runs in a
+  // terminal window rather than detached like the other actions.
+  function installDesktop() {
+    if (installed || installWatch.running) return
+    actionStatus = "Opening installer…"
+    actionStatusTimer.restart()
+    installWatch.ticks = 0
+    installWatch.restart()
+    Quickshell.execDetached(["omarchy-launch-terminal", "bash", "-c",
+      "bash \"" + installScriptPath + "\"; echo; read -n 1 -s -r -p 'Press any key to close…'"])
   }
 
   function toggleSync() {
@@ -156,6 +172,22 @@ Item {
   }
 
   Timer {
+    // Poll quickly after kicking off the installer so the panel flips to the
+    // installed state soon after pacman finishes, instead of waiting for the
+    // next periodic refresh.
+    id: installWatch
+    property int ticks: 0
+    interval: 3000
+    repeat: true
+    running: false
+    onTriggered: {
+      ticks += 1
+      if (root.installed || ticks >= 100) running = false
+      else root.refresh()
+    }
+  }
+
+  Timer {
     id: actionStatusTimer
     interval: 2200
     repeat: false
@@ -172,8 +204,12 @@ Item {
       root.refreshing = false
       var stdout = String(statusStdout.text || root._statusOutput || "")
       var stderr = String(statusStderr.text || root._statusError || "")
-      if (exitCode === 0) root.applyStatus(stdout)
-      else root.lastError = root.elideStatus(stderr || stdout || "Could not read Nextcloud status")
+      if (exitCode === 0) {
+        root.probed = true
+        root.applyStatus(stdout)
+      } else {
+        root.lastError = root.elideStatus(stderr || stdout || "Could not read Nextcloud status")
+      }
     }
   }
 
