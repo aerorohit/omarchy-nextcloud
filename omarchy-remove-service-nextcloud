@@ -21,4 +21,8 @@ if [[ -f $shell_json ]]; then
 fi
 
 echo "Removing packages..."
-omarchy-pkg-remove nextcloud-client
+MARKER_FILE="$HOME/.config/omarchy/plugins/aerorohit.nextcloud/.installed-nextcloud-client"
+if [[ -f $MARKER_FILE ]]; then
+  omarchy-pkg-remove nextcloud-client
+  rm -f "$MARKER_FILE"
+fi

@@ -3,7 +3,11 @@
 # omarchy:summary=Install and start the Nextcloud service.
 
 echo "Installing all dependencies..."
-omarchy-pkg-add nextcloud-client
+MARKER_FILE="$HOME/.config/omarchy/plugins/aerorohit.nextcloud/.installed-nextcloud-client"
+if ! pacman -Q nextcloud-client &>/dev/null; then
+  omarchy-pkg-add nextcloud-client
+  touch "$MARKER_FILE"
+fi
 
 echo "Adding Nextcloud to the bar..."
 omarchy-plugin-enable aerorohit.nextcloud
