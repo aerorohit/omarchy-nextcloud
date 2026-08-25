@@ -40,9 +40,13 @@ Item {
   readonly property bool busy: statusProcess.running
   readonly property string helperPath: (userConfigPath || "") + "/plugins/aerorohit.nextcloud/status.py"
   readonly property string installScriptPath: (userConfigPath || "") + "/plugins/aerorohit.nextcloud/omarchy-install-service-nextcloud"
+  readonly property int MAX_STATUS_OUTPUT_BYTES: 256 * 1024
+  readonly property int MAX_TOGGLE_OUTPUT_BYTES: 32 * 1024
 
   property string _statusOutput: ""
   property string _statusError: ""
+  property string _toggleStdout: ""
+  property string _toggleStderr: ""
 
   function setting(name, fallback) {
     var value = settings ? settings[name] : undefined
@@ -198,8 +202,8 @@ Item {
     id: statusProcess
     running: false
     command: []
-    stdout: StdioCollector { id: statusStdout; waitForEnd: true; onStreamFinished: root._statusOutput = text }
-    stderr: StdioCollector { id: statusStderr; waitForEnd: true; onStreamFinished: root._statusError = text }
+    stdout: StdioCollector { id: statusStdout; waitForEnd: true; onStreamFinished: { var t = text; root._statusOutput = t.length > root.MAX_STATUS_OUTPUT_BYTES ? t.slice(0, root.MAX_STATUS_OUTPUT_BYTES) : t } }
+    stderr: StdioCollector { id: statusStderr; waitForEnd: true; onStreamFinished: { var t = text; root._statusError = t.length > root.MAX_STATUS_OUTPUT_BYTES ? t.slice(0, root.MAX_STATUS_OUTPUT_BYTES) : t } }
     onExited: function(exitCode) {
       root.refreshing = false
       var stdout = String(statusStdout.text || root._statusOutput || "")
@@ -217,8 +221,8 @@ Item {
     id: toggleProcess
     running: false
     command: []
-    stdout: StdioCollector { id: toggleStdout; waitForEnd: true }
-    stderr: StdioCollector { id: toggleStderr; waitForEnd: true }
+    stdout: StdioCollector { id: toggleStdout; waitForEnd: true; onStreamFinished: { var t = text; root._toggleStdout = t.length > root.MAX_TOGGLE_OUTPUT_BYTES ? t.slice(0, root.MAX_TOGGLE_OUTPUT_BYTES) : t } }
+    stderr: StdioCollector { id: toggleStderr; waitForEnd: true; onStreamFinished: { var t = text; root._toggleStderr = t.length > root.MAX_TOGGLE_OUTPUT_BYTES ? t.slice(0, root.MAX_TOGGLE_OUTPUT_BYTES) : t } }
     onExited: function(exitCode) {
       if (exitCode !== 0) {
         root._desired = -1

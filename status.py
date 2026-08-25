@@ -5,7 +5,17 @@ import shutil
 import subprocess
 import sys
 import heapq
+import time
 from pathlib import Path
+
+
+MAX_CFG_BYTES = 64 * 1024
+MAX_LOG_BYTES = 128 * 1024
+MAX_SUBPROCESS_BYTES = 32 * 1024
+MAX_SCAN_DEPTH = 10
+MAX_FILES_SCANNED = 10000
+SCAN_DEADLINE_SEC = 5.0
+MAX_RESPONSE_BYTES = 256 * 1024
 
 
 def read_nextcloud_cfg():
@@ -15,8 +25,9 @@ def read_nextcloud_cfg():
   try:
     cfg = {}
     with cfg_path.open("r", encoding="utf-8") as f:
+      data = f.read(MAX_CFG_BYTES)
       current_section = None
-      for line in f:
+      for line in data.splitlines():
         line = line.strip()
         if line.startswith("[") and line.endswith("]"):
           current_section = line[1:-1]
@@ -79,90 +90,91 @@ def get_accounts(cfg):
   return accounts
 
 
-def command_output(command):
+def _run_bounded(command, timeout):
   try:
-    completed = subprocess.run(command, check=False, capture_output=True, text=True, timeout=4)
-  except (OSError, subprocess.TimeoutExpired):
+    proc = subprocess.Popen(
+      command,
+      stdout=subprocess.PIPE,
+      stderr=subprocess.PIPE,
+    )
+    try:
+      stdout, stderr = proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+      proc.kill()
+      stdout, stderr = proc.communicate()
+    out = (stdout + stderr)[:MAX_SUBPROCESS_BYTES].decode("utf-8", errors="ignore").strip()
+    return proc.returncode, out
+  except (OSError, Exception):
     return 1, ""
-  return completed.returncode, (completed.stdout + completed.stderr).strip()
+
+
+def command_output(command):
+  return _run_bounded(command, 4)
 
 
 def check_nextcloud_running():
-  try:
-    result = subprocess.run(
-      ["pgrep", "-x", "nextcloud"],
-      check=False, capture_output=True, text=True, timeout=2
-    )
-    return result.returncode == 0
-  except (OSError, subprocess.TimeoutExpired):
-    return False
+  return _run_bounded(["pgrep", "-x", "nextcloud"], 2)[0] == 0
 
 
 def get_dbus_sync_status():
-  try:
-    result = subprocess.run(
-      ["busctl", "--user", "get-property",
-       "com.nextcloudgmbh.Nextcloud",
-       "/com/nextcloudgmbh/Nextcloud/Folder/0",
-       "org.freedesktop.CloudProviders.Account", "Status"],
-      check=False, capture_output=True, text=True, timeout=2
-    )
-    if result.returncode == 0:
-      value = result.stdout.strip().split()[-1]
-      status_map = {
-        "1": "syncing",
-        "2": "error",
-        "3": "paused",
-        "4": "offline",
-      }
-      return status_map.get(value, "unknown")
-    return "unknown"
-  except (OSError, subprocess.TimeoutExpired):
-    return "unknown"
+  returncode, out = _run_bounded([
+    "busctl", "--user", "get-property",
+    "com.nextcloudgmbh.Nextcloud",
+    "/com/nextcloudgmbh/Nextcloud/Folder/0",
+    "org.freedesktop.CloudProviders.Account", "Status"
+  ], 2)
+  if returncode == 0:
+    value = out.strip().split()[-1]
+    status_map = {
+      "1": "syncing",
+      "2": "error",
+      "3": "paused",
+      "4": "offline",
+    }
+    return status_map.get(value, "unknown")
+  return "unknown"
 
 
 def get_dbus_status_details():
-  try:
-    result = subprocess.run(
-      ["busctl", "--user", "get-property",
-       "com.nextcloudgmbh.Nextcloud",
-       "/com/nextcloudgmbh/Nextcloud/Folder/0",
-       "org.freedesktop.CloudProviders.Account", "StatusDetails"],
-      check=False, capture_output=True, text=True, timeout=2
-    )
-    if result.returncode == 0:
-      details = result.stdout.strip()
-      if '"' in details:
-        return details.split('"')[1]
-    return ""
-  except (OSError, subprocess.TimeoutExpired):
-    return ""
+  returncode, out = _run_bounded([
+    "busctl", "--user", "get-property",
+    "com.nextcloudgmbh.Nextcloud",
+    "/com/nextcloudgmbh/Nextcloud/Folder/0",
+    "org.freedesktop.CloudProviders.Account", "StatusDetails"
+  ], 2)
+  if returncode == 0:
+    details = out.strip()
+    if '"' in details:
+      return details.split('"')[1]
+  return ""
 
 
 def toggle_sync():
   if not check_nextcloud_running():
     return False
-  try:
-    subprocess.run(
-      ["gdbus", "call", "--session",
-       "--dest", "com.nextcloudgmbh.Nextcloud",
-       "--object-path", "/com/nextcloudgmbh/Nextcloud/Folder/0",
-       "--method", "org.gtk.Actions.Activate",
-       "pause", "[]", "{}"],
-      check=False, capture_output=True, text=True, timeout=4
-    )
-    return True
-  except (OSError, subprocess.TimeoutExpired):
-    return False
+  returncode, _ = _run_bounded([
+    "gdbus", "call", "--session",
+    "--dest", "com.nextcloudgmbh.Nextcloud",
+    "--object-path", "/com/nextcloudgmbh/Nextcloud/Folder/0",
+    "--method", "org.gtk.Actions.Activate",
+    "pause", "[]", "{}"
+  ], 4)
+  return returncode == 0
 
 
 def get_sync_status_from_log():
   log_path = Path.home() / ".local" / "share" / "data" / "Nextcloud" / "Nextcloud_sync.log"
   if not log_path.exists():
     return "Unknown"
-  
+
   try:
-    lines = log_path.read_text(encoding="utf-8", errors="ignore").strip().split("\n")
+    size = log_path.stat().st_size
+    read_size = min(size, MAX_LOG_BYTES)
+    with log_path.open("rb") as f:
+      if size > read_size:
+        f.seek(-read_size, os.SEEK_END)
+      data = f.read(read_size).decode("utf-8", errors="ignore")
+    lines = data.strip().split("\n")
     for line in reversed(lines):
       if "Sync state" in line or "status.php" in line.lower() or "sync" in line.lower():
         if "finished" in line.lower() or "complete" in line.lower():
@@ -182,10 +194,23 @@ def scan_folder(path, limit):
   total = 0
   counter = 0
   recent = []
+  files_scanned = 0
+  base_depth = path.rstrip(os.sep).count(os.sep)
+  deadline = time.monotonic() + SCAN_DEADLINE_SEC
   try:
     for root, dirs, files in os.walk(path):
+      if time.monotonic() > deadline:
+        break
+      current_depth = root.count(os.sep) - base_depth
+      if current_depth >= MAX_SCAN_DEPTH:
+        dirs[:] = []
+        continue
       dirs[:] = [name for name in dirs if not os.path.islink(os.path.join(root, name))]
       for name in files:
+        if files_scanned >= MAX_FILES_SCANNED:
+          break
+        if time.monotonic() > deadline:
+          break
         file_path = os.path.join(root, name)
         if os.path.islink(file_path) or name.startswith("."):
           continue
@@ -204,11 +229,14 @@ def scan_folder(path, limit):
           "sizeBytes": stat.st_size,
         }
         counter += 1
+        files_scanned += 1
         entry = (row["modifiedTs"], counter, row)
         if len(recent) < limit:
           heapq.heappush(recent, entry)
         else:
           heapq.heappushpop(recent, entry)
+      if files_scanned >= MAX_FILES_SCANNED:
+        break
   except OSError:
     return 0, []
   rows = [entry[2] for entry in sorted(recent, reverse=True)]
@@ -288,7 +316,7 @@ def main():
   quota_known = False
   usage_percent = (total_used / quota_bytes * 100) if quota_bytes > 0 else 0
 
-  print(json.dumps({
+  result = {
     "ok": True,
     "installed": nextcloud_bin is not None,
     "running": running,
@@ -304,7 +332,16 @@ def main():
     "quotaKnown": quota_known,
     "files": files,
     "dbusStatus": dbus_status,
-  }))
+  }
+
+  output = json.dumps(result)
+  if len(output.encode("utf-8")) > MAX_RESPONSE_BYTES:
+    while files and len(output.encode("utf-8")) > MAX_RESPONSE_BYTES:
+      files = files[:-1]
+      result["files"] = files
+      output = json.dumps(result)
+
+  print(output)
 
 
 if __name__ == "__main__":
