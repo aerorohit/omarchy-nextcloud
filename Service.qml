@@ -79,16 +79,24 @@ Item {
     installed = parsed.installed === true
     running = parsed.running === true
     authenticated = parsed.authenticated === true
-    statusText = String(parsed.statusText || (installed ? "Stopped" : "Not installed"))
-    accountPath = String(parsed.accountPath || "")
-    serverUrl = String(parsed.serverUrl || "")
+    var st = String(parsed.statusText || (installed ? "Stopped" : "Not installed"))
+    statusText = st.length > 500 ? st.substring(0, 497) + "…" : st
+    var ap = String(parsed.accountPath || "")
+    accountPath = ap.length > 1000 ? ap.substring(0, 997) + "…" : ap
+    var su = String(parsed.serverUrl || "")
+    serverUrl = su.length > 500 ? su.substring(0, 497) + "…" : su
     usedBytes = Number(parsed.usedBytes || 0)
     quotaBytes = Number(parsed.quotaBytes || 0)
     usagePercent = Number(parsed.usagePercent || 0)
     quotaKnown = parsed.quotaKnown === true
-    files = parsed.files || []
+    var src = parsed.files || []
+    var maxFiles = 100
+    files = []
+    for (var i = 0; i < src.length && i < maxFiles; i++) {
+      var f = src[i]
+      if (f && typeof f === "object" && f.name && f.path) files.push(f)
+    }
     dbusStatus = String(parsed.dbusStatus || "unknown")
-    // Reality caught up to the pending toggle — stop overriding.
     if (_desired !== -1 && syncEnabled === (_desired === 1)) _desired = -1
     lastError = ""
   }
@@ -100,7 +108,9 @@ Item {
 
   function openFile(file) {
     if (!file || !file.path) return
-    Quickshell.execDetached(["xdg-open", file.path])
+    var p = String(file.path).trim()
+    if (p === "" || p.indexOf("..") !== -1 || p.indexOf("\n") !== -1) return
+    Quickshell.execDetached(["xdg-open", p])
   }
 
   function openApp() {

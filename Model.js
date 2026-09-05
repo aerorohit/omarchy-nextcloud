@@ -21,6 +21,15 @@ function parseStatus(raw) {
     var parsed = JSON.parse(text)
     if (!parsed || typeof parsed !== "object") return defaultStatus()
     parsed.files = Array.isArray(parsed.files) ? parsed.files : []
+    for (var i = 0; i < parsed.files.length; i++) {
+      var f = parsed.files[i]
+      if (!f || typeof f !== "object") { parsed.files.splice(i, 1); i--; continue }
+      f.name = String(f.name || "")
+      f.path = String(f.path || "")
+      f.folder = String(f.folder || "")
+      f.modifiedTs = Number(f.modifiedTs || 0)
+      f.sizeBytes = Number(f.sizeBytes || 0)
+    }
     return parsed
   } catch (e) {
     var failed = defaultStatus()

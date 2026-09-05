@@ -2,6 +2,7 @@ import json
 import os
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import heapq
@@ -108,10 +109,6 @@ def _run_bounded(command, timeout):
     return 1, ""
 
 
-def command_output(command):
-  return _run_bounded(command, 4)
-
-
 def check_nextcloud_running():
   return _run_bounded(["pgrep", "-x", "nextcloud"], 2)[0] == 0
 
@@ -144,8 +141,9 @@ def get_dbus_status_details():
   ], 2)
   if returncode == 0:
     details = out.strip()
-    if '"' in details:
-      return details.split('"')[1]
+    parts = details.split('"')
+    if len(parts) >= 2:
+      return parts[1]
   return ""
 
 
@@ -173,6 +171,7 @@ def get_sync_status_from_log():
     with log_path.open("rb") as f:
       if size > read_size:
         f.seek(-read_size, os.SEEK_END)
+        f.readline()
       data = f.read(read_size).decode("utf-8", errors="ignore")
     lines = data.strip().split("\n")
     for line in reversed(lines):
@@ -190,7 +189,20 @@ def get_sync_status_from_log():
     return "Unknown"
 
 
+def _is_safe_path(path):
+  try:
+    resolved = os.path.realpath(path)
+    home = os.path.realpath(Path.home())
+    return resolved.startswith(home + os.sep) or resolved == home
+  except (OSError, ValueError):
+    return False
+
+
 def scan_folder(path, limit):
+  if not _is_safe_path(path):
+    return 0, []
+  if not os.path.isdir(path):
+    return 0, []
   total = 0
   counter = 0
   recent = []
@@ -198,35 +210,37 @@ def scan_folder(path, limit):
   base_depth = path.rstrip(os.sep).count(os.sep)
   deadline = time.monotonic() + SCAN_DEADLINE_SEC
   try:
-    for root, dirs, files in os.walk(path):
+    for root_dir, dirs, files in os.walk(path):
       if time.monotonic() > deadline:
         break
-      current_depth = root.count(os.sep) - base_depth
+      current_depth = root_dir.count(os.sep) - base_depth
       if current_depth >= MAX_SCAN_DEPTH:
         dirs[:] = []
         continue
-      dirs[:] = [name for name in dirs if not os.path.islink(os.path.join(root, name))]
+      dirs[:] = [name for name in dirs if not os.path.islink(os.path.join(root_dir, name))]
       for name in files:
         if files_scanned >= MAX_FILES_SCANNED:
           break
         if time.monotonic() > deadline:
           break
-        file_path = os.path.join(root, name)
+        file_path = os.path.join(root_dir, name)
         if os.path.islink(file_path) or name.startswith("."):
           continue
         try:
-          stat = os.stat(file_path)
+          st = os.lstat(file_path)
         except OSError:
           continue
-        total += stat.st_size
+        if not stat.S_ISREG(st.st_mode):
+          continue
+        total += st.st_size
         rel = os.path.relpath(file_path, path)
         folder = os.path.dirname(rel)
         row = {
           "name": name,
           "path": file_path,
           "folder": "/" if folder in ("", ".") else folder,
-          "modifiedTs": int(stat.st_mtime),
-          "sizeBytes": stat.st_size,
+          "modifiedTs": int(st.st_mtime),
+          "sizeBytes": st.st_size,
         }
         counter += 1
         files_scanned += 1
