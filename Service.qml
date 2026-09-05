@@ -40,8 +40,8 @@ Item {
   readonly property bool busy: statusProcess.running
   readonly property string helperPath: (userConfigPath || "") + "/plugins/aerorohit.nextcloud/status.py"
   readonly property string installScriptPath: (userConfigPath || "") + "/plugins/aerorohit.nextcloud/omarchy-install-service-nextcloud"
-  readonly property int MAX_STATUS_OUTPUT_BYTES: 256 * 1024
-  readonly property int MAX_TOGGLE_OUTPUT_BYTES: 32 * 1024
+  readonly property int maxStatusOutputBytes: 256 * 1024
+  readonly property int maxToggleOutputBytes: 32 * 1024
 
   property string _statusOutput: ""
   property string _statusError: ""
@@ -59,6 +59,22 @@ Item {
     if (n < min) n = min
     if (n > max) n = max
     return n
+  }
+
+  function _truncateStatus(t) {
+    _statusOutput = t.length > maxStatusOutputBytes ? t.slice(0, maxStatusOutputBytes) : t
+  }
+
+  function _truncateError(t) {
+    _statusError = t.length > maxStatusOutputBytes ? t.slice(0, maxStatusOutputBytes) : t
+  }
+
+  function _truncateToggleOut(t) {
+    _toggleStdout = t.length > maxToggleOutputBytes ? t.slice(0, maxToggleOutputBytes) : t
+  }
+
+  function _toggleErr(t) {
+    _toggleStderr = t.length > maxToggleOutputBytes ? t.slice(0, maxToggleOutputBytes) : t
   }
 
   function refresh() {
@@ -212,8 +228,8 @@ Item {
     id: statusProcess
     running: false
     command: []
-    stdout: StdioCollector { id: statusStdout; waitForEnd: true; onStreamFinished: { var t = text; root._statusOutput = t.length > root.MAX_STATUS_OUTPUT_BYTES ? t.slice(0, root.MAX_STATUS_OUTPUT_BYTES) : t } }
-    stderr: StdioCollector { id: statusStderr; waitForEnd: true; onStreamFinished: { var t = text; root._statusError = t.length > root.MAX_STATUS_OUTPUT_BYTES ? t.slice(0, root.MAX_STATUS_OUTPUT_BYTES) : t } }
+    stdout: StdioCollector { id: statusStdout; waitForEnd: true; onStreamFinished: root._truncateStatus(text) }
+    stderr: StdioCollector { id: statusStderr; waitForEnd: true; onStreamFinished: root._truncateError(text) }
     onExited: function(exitCode) {
       root.refreshing = false
       var stdout = String(statusStdout.text || root._statusOutput || "")
@@ -231,8 +247,8 @@ Item {
     id: toggleProcess
     running: false
     command: []
-    stdout: StdioCollector { id: toggleStdout; waitForEnd: true; onStreamFinished: { var t = text; root._toggleStdout = t.length > root.MAX_TOGGLE_OUTPUT_BYTES ? t.slice(0, root.MAX_TOGGLE_OUTPUT_BYTES) : t } }
-    stderr: StdioCollector { id: toggleStderr; waitForEnd: true; onStreamFinished: { var t = text; root._toggleStderr = t.length > root.MAX_TOGGLE_OUTPUT_BYTES ? t.slice(0, root.MAX_TOGGLE_OUTPUT_BYTES) : t } }
+    stdout: StdioCollector { id: toggleStdout; waitForEnd: true; onStreamFinished: root._truncateToggleOut(text) }
+    stderr: StdioCollector { id: toggleStderr; waitForEnd: true; onStreamFinished: root._toggleErr(text) }
     onExited: function(exitCode) {
       if (exitCode !== 0) {
         root._desired = -1
