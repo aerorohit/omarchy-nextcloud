@@ -19,9 +19,21 @@ SCAN_DEADLINE_SEC = 5.0
 MAX_RESPONSE_BYTES = 256 * 1024
 
 
+def find_nextcloud_cfg():
+  home = Path.home()
+  candidates = [
+    home / ".config" / "Nextcloud" / "nextcloud.cfg",
+    home / ".var" / "app" / "com.nextcloud.desktopclient.nextcloud" / "config" / "Nextcloud" / "nextcloud.cfg",
+  ]
+  for p in candidates:
+    if p.exists():
+      return p
+  return None
+
+
 def read_nextcloud_cfg():
-  cfg_path = Path.home() / ".config" / "Nextcloud" / "nextcloud.cfg"
-  if not cfg_path.exists():
+  cfg_path = find_nextcloud_cfg()
+  if not cfg_path:
     return {}
   try:
     cfg = {}
@@ -288,7 +300,7 @@ def main():
   
   for account in accounts:
     for folder in account["folders"]:
-      local_path = folder["localPath"]
+      local_path = os.path.expanduser(folder["localPath"])
       if folder["paused"] or dbus_status == "paused":
         any_folder_paused = True
       else:
