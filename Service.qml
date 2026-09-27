@@ -107,11 +107,12 @@ Item {
     quotaKnown = parsed.quotaKnown === true
     var src = parsed.files || []
     var maxFiles = 100
-    files = []
+    var newFiles = []
     for (var i = 0; i < src.length && i < maxFiles; i++) {
       var f = src[i]
-      if (f && typeof f === "object" && f.name && f.path) files.push(f)
+      if (f && typeof f === "object" && f.name && f.path) newFiles.push(f)
     }
+    files = newFiles
     dbusStatus = String(parsed.dbusStatus || "unknown")
     if (_desired !== -1 && syncEnabled === (_desired === 1)) _desired = -1
     lastError = ""
